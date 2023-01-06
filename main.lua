@@ -1,20 +1,20 @@
 -- CONFIG
 local nTotal = 1000 -- Amount of ants 
-local releaseTime = 5
-local nestX, nestY, nestR = 900, 450, 50
-local w, h = 1800, 900
-local explorationDesirability = 0.2
-local pheromoneDesirability = 0.25
-local foodDesirability = 1
-local pheromoneRelease = 1
-local evaporationRate = 0.005
-local maxPheromoneIntensity = 100
-local foodBatches = 5
-local foodBatchSize = 300
-local foodDetectionDistance = 25
-local antSpeed = 3
-local antFov = math.pi / 4
-local antViewDist = 10
+local releaseTime = 5 -- Amount of time (seconds) ants should be release in
+local nestX, nestY, nestR = 900, 450, 50 -- Nest position and size
+local w, h = 1800, 900 -- Resolution and world size
+local explorationDesirability = 0.2 -- Exploration preference
+local pheromoneDesirability = 0.25  -- Pheromone following preference
+local foodDesirability = 1 -- Food following preference
+local pheromoneRelease = 1 -- Amount of pheromones released by single ant every tick
+local evaporationRate = 0.005 -- Evaporation per tick
+local maxPheromoneIntensity = 100 -- Max pheromone concentration
+local foodBatches = 5 -- Amount of food clusters
+local foodBatchSize = 300 -- Amount of food in clsters (and size of the cluster)
+local foodDetectionDistance = 25 -- How far away can an ant see the food from
+local antSpeed = 3 -- Speed of the ants
+local antFov = math.pi / 4 -- Field of view of the ants
+local antViewDist = 10 -- Distance of ant vision
 
 local ants = {}
 local foodCollected = 0

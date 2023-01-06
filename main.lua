@@ -1,171 +1,300 @@
-Ants = {}
+-- CONFIG
+local nTotal = 1000 -- Amount of ants 
+local releaseTime = 5
+local nestX, nestY, nestR = 900, 450, 50
+local w, h = 1800, 900
+local explorationDesirability = 0.2
+local pheromoneDesirability = 0.25
+local foodDesirability = 1
+local pheromoneRelease = 1
+local evaporationRate = 0.005
+local maxPheromoneIntensity = 100
+local foodBatches = 5
+local foodBatchSize = 300
+local foodDetectionDistance = 25
+local antSpeed = 3
+local antFov = math.pi / 4
+local antViewDist = 10
 
-local antSprite = love.graphics.newImage('sprites/ant.png')
-local map = love.image.newImageData('sprites/map.png')
-local mapImg =  love.graphics.newImage(map)
-local food = love.image.newImageData('sprites/food.png')
-local foodImg = love.graphics.newImage(food)
-local pheromoneMap = love.image.newImageData(128, 72)
-local pheromoneImg =  love.graphics.newImage(pheromoneMap)
-
--- Config
-local n = 1000
-local nestX, nestY, nestRadius = 200, 400, 50
-local w, h = 1280, 720
-local antSpeed = 120
-local explorationDesirability = 1
-local pheromoneDesirability = 5
-local evaporationRate = 0.15
-local pheromoneRelease = 0.1
-
+local ants = {}
 local foodCollected = 0
+local n = 0
+local foodBatch = {}
 
-local function clamp(val, min, max)
-    return math.max(min, math.min(max, val))
-end
+local pheromones = {}
 
-local function moveAnts(dt)
-    for k, ant in pairs(Ants) do
-        -- Check for collisions
-        local r, g, b, a = map:getPixel(ant.x, ant.y)
-        if r == 52/255 and g == 73/255 and b == 94/255 then
-            ant.rot = ant.rot + math.pi
-            ant.x = ant.x + antSpeed * math.sin(ant.rot) * dt
-            ant.y = ant.y - antSpeed * math.cos(ant.rot) * dt
-        end
+local pheromoneMap = love.image.newImageData(w, h)
+local pheromoneImg = love.graphics.newImage(pheromoneMap)
 
-        local pheromoneRot = 0
+local function round(val) return math.floor(val + 0.5) end
+local function clamp(val, min, max) return (math.min(max, math.max(val, min))) end
+local function dot(vec1, vec2) return vec1.x*vec2.x + vec1.y*vec2.y end
 
-        -- Check for pheromones
-        local x = ant.x/10 + math.sin(ant.rot) * 1.2
-        r, g, b, a = pheromoneMap:getPixel(ant.x/10 + math.sin(ant.rot - math.pi/4) * 1.2, ant.y/10 - math.cos(ant.rot - math.pi/4) * 1.2)
-        local r2, g2, b2, a2 = pheromoneMap:getPixel(ant.x/10 + math.sin(ant.rot + math.pi/4) * 1.2, ant.y/10 - math.cos(ant.rot + math.pi/4) * 1.2)
-        if a > 0 or a2 > 0 then
-            if ant.holdingFood then
-                pheromoneRot = math.pi * clamp(b2 - b, -1.0, 1.0)
-            else 
-                if g > 0 then pheromoneRot = math.pi * clamp(b2 - b, -1.0, 1.0) end
-            end
-        end
+local function spawnAnts(dt)
+    local toSpawnPerSec = nTotal / releaseTime
+    local toSpawn = dt * toSpawnPerSec
+    if toSpawn > nTotal - n then toSpawn = nTotal - n end
 
-        -- Explore
-        local explorationRot = (math.random()*2-1) * 2 * math.pi
-
-        -- Final rotation
-        if pheromoneRot ~= 0 then
-            ant.rot = ant.rot + pheromoneRot * pheromoneDesirability * dt + explorationRot * explorationDesirability * dt
-        else
-            ant.rot = ant.rot + pheromoneRot * pheromoneDesirability * dt + explorationRot * explorationDesirability * dt
-        end
-        
-
-        -- Move forward
-        ant.x = ant.x + antSpeed * math.sin(ant.rot) * dt
-        ant.y = ant.y - antSpeed * math.cos(ant.rot) * dt
-
-        -- Map bounds check
-        if ant.x < 10 or ant.x > w-10 or ant.y < 10 or ant.y > h-10 then
-            ant.x = nestX + math.sin(ant.rot) * nestRadius
-            ant.y = nestY - math.cos(ant.rot) * nestRadius
-        end
+    for i = 1, toSpawn do
+        local randRot = math.random() * math.pi * 2
+        local ant = {}
+        ant.x = nestX + round(math.sin(randRot) * nestR)
+        ant.y = nestY - round(math.cos(randRot) * nestR)
+        ant.vel = {
+            x = math.sin(randRot),
+            y = -math.cos(randRot)
+        }
+        ant.holdingFood = false
+        table.insert(ants, ant)
+        n = n + 1
     end
 end
 
-local function releasePheromones(dt)
-    for k, ant in pairs(Ants) do
-        local r, g, b, a = pheromoneMap:getPixel(ant.x/10, ant.y/10)
+local function angVec(vec1, vec2)
+    local vec1len = math.sqrt(vec1.x^2 + vec1.y^2)
+    local vec2len = math.sqrt(vec2.x^2 + vec2.y^2)
+    return math.acos(dot(vec1, vec2)/(math.abs(vec1len)*math.abs(vec2len)))
+end
+
+local function normalize(vec)
+    local len = math.sqrt(vec.x ^ 2 + vec.y ^ 2)
+    if len == 0 then return {x = 0, y = 0} end
+    return {x = vec.x/len, y = vec.y/len}
+end
+
+local function moveAnts()
+    for k, ant in pairs(ants) do
+
+        -- Exploration
+        local dx = math.random() * 2 - 1
+        local dy = math.random() * 2 - 1
+
+        -- Food detection
+        local fx, fy = 0, 0
+        local closest = 9999999999
+        if not ant.holdingFood then
+            for i, batch in pairs(foodBatch) do
+                if ((ant.x - batch.x)^2 + (ant.y - batch.y)^2) < (foodBatchSize/3)^2 then
+                    for key, f in pairs(batch.food) do
+                        local dist = (f.x - ant.x)^2 + (f.y - ant.y)^2
+                        if dist < foodDetectionDistance^2 then
+                            if dist < closest then
+                                closest = dist
+                                fx = f.x - ant.x
+                                fy = f.y - ant.y
+                                if dist < 3 then -- Grab
+                                    ant.vel.x = ant.vel.x * -1
+                                    ant.vel.y = ant.vel.y * -1
+                                    ant.holdingFood = true
+                                    table.remove(batch.food, key)
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Pheromone detection
+        local px, py = 0, 0
+        local frontX, frontY = round(ant.x + ant.vel.x * antViewDist), round(ant.y + ant.vel.y * antViewDist)
+        local ang = math.atan2(ant.vel.y, ant.vel.x) - math.pi / 2
+        local leftX, leftY = round(ant.x + math.sin(ang - antFov + math.pi) * antViewDist), round(ant.y - math.cos(ang - antFov + math.pi) * antViewDist)
+        local rightX, rightY = round(ant.x + math.sin(ang + antFov + math.pi) * antViewDist), round(ant.y - math.cos(ang + antFov + math.pi) * antViewDist)
+
+        local frontHome, frontFood, leftHome, leftFood, rightHome, rightFood = 0, 0, 0, 0, 0, 0
+        -- Check front
+        for x = -3, 3, 1 do
+            for y = -3, 3, 1 do
+                if frontX + x > 0 and frontX + x < w and frontY + y > 0 and frontY + y < h then
+                    frontHome = frontHome + pheromones[frontX + x][frontY + y].home
+                    frontFood = frontFood + pheromones[frontX + x][frontY + y].food
+                end
+            end
+        end
+        -- Check left
+        for x = -3, 3, 1 do
+            for y = -3, 3, 1 do
+                if leftX + x > 0 and leftX + x < w and leftY + y > 0 and leftY + y < h then
+                    leftHome = leftHome + pheromones[leftX + x][leftY + y].home
+                    leftFood = leftFood + pheromones[leftX + x][leftY + y].food
+                end
+            end
+        end
+        -- Check right
+        for x = -3, 3, 1 do
+            for y = -3, 3, 1 do
+                if rightX + x > 0 and rightX + x < w and rightY + y > 0 and rightY + y < h then
+                    rightHome = rightHome + pheromones[rightX + x][rightY + y].home
+                    rightFood = rightFood + pheromones[rightX + x][rightY + y].food
+                end
+            end
+        end
+        -- Turn towards biggest concentration
         if ant.holdingFood then
-            pheromoneMap:setPixel(ant.x/10, ant.y/10, 0, g + pheromoneRelease, b, 1.0)
+            if frontHome > leftHome and frontHome > rightHome then px = frontX - ant.x py = frontY - ant.y
+            elseif leftHome > frontHome and leftHome > rightHome then px = leftX - ant.x py = leftY - ant.y
+            elseif rightHome > frontHome and rightHome > leftHome then px = rightX - ant.x py = rightY - ant.y end
         else
-            pheromoneMap:setPixel(ant.x/10, ant.y/10, 0, g, b + pheromoneRelease, 1.0)
+            if frontFood > leftFood and frontFood > rightFood then px = frontX - ant.x py = frontY - ant.y
+            elseif leftFood > frontFood and leftFood > rightFood then px = leftX - ant.x py = leftY - ant.y
+            elseif rightFood > frontFood and rightFood > leftFood then px = rightX - ant.x py = rightY - ant.y end
         end
-    end
-end
+        -- Normalize
+        local pVel = normalize({x = px, y = py})
+        px = pVel.x
+        py = pVel.y
 
-local function evaporate(dt)
-    for x = 0, 127 do
-        for y = 0, 71 do
-            local r, g, b, a = pheromoneMap:getPixel(x, y)
-            if a ~= 0 then
-                g = clamp(g - evaporationRate * dt, 0.0, 999.0)
-                b = clamp(b - evaporationRate * dt, 0.0, 999.0)
-                if g > b then a = g else a = b end
-                pheromoneMap:setPixel(x, y, r, g, b, a)
-            end
-        end
-    end
-end
-
-local function checkForFood()
-    for k, ant in pairs(Ants) do
-        if ant.holdingFood == false then
-            local r, g, b, a = food:getPixel(ant.x, ant.y)
-            if a == 1 then
-                ant.holdingFood = true
-                ant.rot = ant.rot + math.pi
-                food:setPixel(ant.x, ant.y, r, g, b, 0.0)
-            end
-        end
-    end
-end
-
-local function checkForNest()
-    for k, ant in pairs(Ants) do
+        -- Check for nest proximity
+        local nx, ny = 0, 0
         if ant.holdingFood then
-            if (ant.x - nestX)^2 + (ant.y - nestY)^2 < nestRadius^2 then
+            if (ant.x - nestX)^2 + (ant.y - nestY)^2 < (nestR*1.5)^2 then
+                nx = nestX - ant.x
+                ny = nestY - ant.y
+            end
+        end
+        -- Sum up velocities
+        local vel = {
+            x = ant.vel.x + dx * explorationDesirability + fx * foodDesirability + px * pheromoneDesirability + nx,
+            y = ant.vel.y + dy * explorationDesirability + fy * foodDesirability + py * pheromoneDesirability + ny
+        }
+        ant.vel = normalize(vel)
+
+        ant.x = round(ant.x + ant.vel.x * antSpeed)
+        ant.y = round(ant.y + ant.vel.y * antSpeed)
+
+        -- Check for the nest collision
+        if ant.holdingFood then
+            if (ant.x - nestX) ^ 2 + (ant.y - nestY)^2 < nestR ^ 2 then
                 ant.holdingFood = false
-                ant.rot = ant.rot + math.pi
                 foodCollected = foodCollected + 1
+                ant.vel.x = -ant.vel.x
+                ant.vel.y = -ant.vel.y
             end
         end
+
+        -- Check for map bounds
+        if ant.x < 0 then ant.x = 1 ant.vel.x = -ant.vel.x end
+        if ant.x >= w then ant.x = w - 1 ant.vel.x = -ant.vel.x end
+        if ant.y < 0 then ant.y = 1 ant.vel.y = -ant.vel.y end
+        if ant.y >= h then ant.y = h - 1 ant.vel.y = -ant.vel.y end
     end
+end
+
+local function releasePheromones()
+    for k, ant in pairs(ants) do
+        if ant.holdingFood then 
+            pheromones[ant.x + 1][ant.y + 1].food = pheromones[ant.x + 1][ant.y + 1].food + pheromoneRelease
+        else
+            pheromones[ant.x + 1][ant.y + 1].home = pheromones[ant.x + 1][ant.y + 1].home + pheromoneRelease
+        end
+    end
+end
+
+local function evaporate()
+    for x = 1, w do
+        for y = 1, h do
+            pheromones[x][y].food = clamp(pheromones[x][y].food - evaporationRate, 0, maxPheromoneIntensity)
+            pheromones[x][y].home = clamp(pheromones[x][y].home - evaporationRate, 0, maxPheromoneIntensity)
+        end
+    end
+end 
+
+local function generatePheromoneImg()
+    for x = 1, w do
+        for y = 1, h do
+            local a = 0
+            if pheromones[x][y].food > pheromones[x][y].home then a = pheromones[x][y].food else a = pheromones[x][y].home end
+            pheromoneMap:setPixel(x - 1, y - 1, pheromones[x][y].food, 0, pheromones[x][y].home, a)
+        end
+    end
+    pheromoneImg:replacePixels(pheromoneMap)
 end
 
 function love.load()
-    -- Setup
     love.window.setMode(w, h)
-    love.window.setTitle('Ants Simulation - ' .. n .. ' ants')
-    love.graphics.setDefaultFilter("nearest", "nearest")
+    love.window.setTitle('Ant colony simulation with '..nTotal..' ants')
+
+    -- Init array
+    for x = 1, w do
+        pheromones[x] = {}
+        for y = 1, h do
+            pheromones[x][y] = {
+                home = 0,
+                food = 0
+            }
+        end
+    end
+
+    -- Init random
     math.randomseed(os.clock())
 
-    -- Spawn ants
-    for i = 1, n do
-        local ant = {}
-        ant.rot = math.random() * 2 * math.pi
-        ant.x = nestX + math.sin(ant.rot) * nestRadius
-        ant.y = nestY - math.cos(ant.rot) * nestRadius
-        ant.holdingFood = false
-        table.insert(Ants, ant)
+    
+
+    -- Spawn food
+    for i = 1, foodBatches do
+        local x = math.random() * w
+        local y = math.random() * h
+
+        table.insert(foodBatch, {
+            x = x,
+            y = y,
+            food = {}
+        })
+
+        for j = 1, foodBatchSize do
+            local fx = x + math.sin(math.random() * math.pi * 2) * math.random() * foodBatchSize/3
+            local fy = y + math.cos(math.random() * math.pi * 2) * math.random() * foodBatchSize/3
+
+            if fx < 0 then fx = fx * -1 end
+            if fx > w then fx = fx - (fx - w) end
+            if fy < 0 then fy = fy * -1 end
+            if fy > h then fy = fy - (fy - h) end
+            
+            table.insert(foodBatch[#foodBatch].food, {
+                x = fx,
+                y = fy
+            })
+        end
     end
 end
 
 function love.update(dt)
-    checkForFood()
-    moveAnts(dt)
-    checkForNest()
-    evaporate(dt)
-    releasePheromones(dt)
+    if n < nTotal then spawnAnts(dt) end
+    moveAnts()
+    releasePheromones()
+    evaporate()
+    generatePheromoneImg()
 end
 
 function love.draw()
-    --love.graphics.reset()
+    love.graphics.draw(pheromoneImg)
 
-    -- World
-    love.graphics.draw(mapImg)
-    foodImg:replacePixels(food)
-    love.graphics.draw(foodImg)
-    pheromoneImg:replacePixels(pheromoneMap)
-    love.graphics.draw(pheromoneImg, nil, nil, nil, 10)
-    
-    -- Draw ants
-    for k, ant in pairs(Ants) do
-        love.graphics.draw(antSprite, ant.x, ant.y, ant.rot, 0.01, nil, antSprite:getWidth()/2, antSprite:getHeight()/2)
+    -- Draw pheromones
+    love.graphics.draw(pheromoneImg)
+
+    -- Draw food
+    love.graphics.setColor(0, 1, 0)
+    for i, batch in pairs(foodBatch) do
+        for k, f in pairs(batch.food) do
+            love.graphics.circle("fill", f.x, f.y, 5)
+        end
     end
-    
-    -- Draw nest
-    love.graphics.setColor(231/255, 76/255, 60/255, 1.0)
-    love.graphics.circle("fill", nestX, nestY, nestRadius)
 
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.printf(''..foodCollected, nestX - 50, nestY - 10, 100, "center")
+    -- Draw ants
+    for k, ant in pairs(ants) do
+        love.graphics.setColor(1, 0, 0)
+        love.graphics.rectangle("fill", ant.x - 2.5, ant.y - 2.5, 5, 5)
+    end
+
+    -- Draw nest
+    love.graphics.setColor(1, 0.5, 0)
+    love.graphics.circle("fill", nestX, nestY, nestR)
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.printf(''..foodCollected, nestX - nestR, nestY - 8, nestR * 2, "center")
+end
+
+function love.conf(t)
+    t.console = true
 end

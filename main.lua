@@ -1,19 +1,19 @@
 -- CONFIG
-local nTotal = 500 -- Amount of ants 
+local nTotal = 1000 -- Amount of ants 
 local releaseTime = 10 -- Amount of time (seconds) ants should be release in
-local nestX, nestY, nestR = 400, 300, 30 -- Nest position and size
-local w, h = 800, 600 -- Resolution and world size
+local nestX, nestY, nestR = 640, 360, 40 -- Nest position and size
+local w, h = 1280, 720 -- Resolution and world size
 local explorationDesirability = 0.2 -- Exploration preference
 local pheromoneDesirability = 0.2  -- Pheromone following preference
 local foodDesirability = 1 -- Food following preference
-local pheromoneRelease = 1 -- Amount of pheromones released by single ant every tick
+local pheromoneRelease = 4 -- Amount of pheromones released by single ant every tick
 local evaporationRate = 0.005 -- Evaporation per tick
-local diffusionRate = 0.5 -- Diffusion per tick
+local diffusionRate = 0.4 -- Diffusion per tick
 local maxPheromoneIntensity = 100 -- Max pheromone concentration
 local foodBatches = 3 -- Amount of food clusters
-local foodBatchSize = 100 -- Amount of food in clsters (and size of the cluster)
+local foodBatchSize = 200 -- Amount of food in clsters (and size of the cluster)
 local foodDetectionDistance = 25 -- How far away can an ant see the food from
-local antSpeed = 2 -- Speed of the ants
+local antSpeed = 3 -- Speed of the ants
 local antFov = math.pi / 4 -- Field of view of the ants
 local antViewDist = 10 -- Distance of ant vision
 
@@ -218,18 +218,18 @@ local function diffuse()
         for y = 1, h do
             local home = pheromones[x][y].home
             local food = pheromones[x][y].food
-            local dHome = math.min(diffusionRate, home) / 8
-            local dFood = math.min(diffusionRate, food) / 8
+            local dHome = (home * diffusionRate) / 8
+            local dFood = (diffusionRate * food) / 8
 
-            newPheromones[x][y].food = math.max(pheromones[x][y].food - dFood*8, 0)
-            newPheromones[x][y].home = math.max(pheromones[x][y].home - dHome*8, 0)
+            newPheromones[x][y].food = newPheromones[x][y].food + math.max(pheromones[x][y].food - dFood*8, 0)
+            newPheromones[x][y].home = newPheromones[x][y].home + math.max(pheromones[x][y].home - dHome*8, 0)
 
              for dx = -1, 1 do
                 if x + dx > 0 and x + dx < w then
                     for dy = -1, 1 do
                         if y + dy > 0 and y + dy < h and not(dx == 0 and dy == 0) then
-                            newPheromones[x + dx][y + dy].food = pheromones[x + dx][y + dy].food + dFood
-                            newPheromones[x + dx][y + dy].home = pheromones[x + dx][y + dy].home + dHome
+                            newPheromones[x + dx][y + dy].food = newPheromones[x + dx][y + dy].food + dFood
+                            newPheromones[x + dx][y + dy].home = newPheromones[x + dx][y + dy].home + dHome
                         end
                     end
                 end

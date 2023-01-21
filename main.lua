@@ -1,19 +1,21 @@
--- CONFIG
+-- CONFIG MAIN
 local nTotal = 1000 -- Amount of ants 
 local releaseTime = 10 -- Amount of time (seconds) ants should be release in
-local nestX, nestY, nestR = 640, 360, 40 -- Nest position and size
 local w, h = 1280, 720 -- Resolution and world size
+local nestX, nestY, nestR = 640, 360, 40 -- Nest position and size
+local antSpeed = 2 -- Speed of the ants
+local pheromoneAdjust = true -- Adjust pheromone visibility for highest concentrations
+-- CONFIG
 local explorationDesirability = 0.2 -- Exploration preference
 local pheromoneDesirability = 0.2  -- Pheromone following preference
 local foodDesirability = 1 -- Food following preference
 local pheromoneRelease = 4 -- Amount of pheromones released by single ant every tick
-local evaporationRate = 0.005 -- Evaporation per tick
+local evaporationRate = 0.01 -- Evaporation per tick
 local diffusionRate = 0.4 -- Diffusion per tick
 local maxPheromoneIntensity = 100 -- Max pheromone concentration
 local foodBatches = 3 -- Amount of food clusters
 local foodBatchSize = 200 -- Amount of food in clsters (and size of the cluster)
 local foodDetectionDistance = 25 -- How far away can an ant see the food from
-local antSpeed = 3 -- Speed of the ants
 local antFov = math.pi / 4 -- Field of view of the ants
 local antViewDist = 10 -- Distance of ant vision
 
@@ -23,9 +25,18 @@ local n = 0
 local foodBatch = {}
 
 local pheromones = {}
+local currentMaxPheromone = 0
+
+-- Half the res for performance
+w = w/2
+h = h/2
+nestX = nestX/2
+nestY = nestY/2
+nestR = nestR/2
 
 local pheromoneMap = love.image.newImageData(w, h)
 local pheromoneImg = love.graphics.newImage(pheromoneMap)
+
 
 local function round(val) return math.floor(val + 0.5) end
 local function clamp(val, min, max) return (math.min(max, math.max(val, min))) end
@@ -74,9 +85,9 @@ local function moveAnts()
         local fx, fy = 0, 0
         local closest = 9999999999
         if not ant.holdingFood then
-            for i, batch in pairs(foodBatch) do
+            for i, batch in ipairs(foodBatch) do
                 if ((ant.x - batch.x)^2 + (ant.y - batch.y)^2) < (foodBatchSize/3)^2 then
-                    for key, f in pairs(batch.food) do
+                    for key, f in ipairs(batch.food) do
                         local dist = (f.x - ant.x)^2 + (f.y - ant.y)^2
                         if dist < foodDetectionDistance^2 then
                             if dist < closest then
@@ -87,7 +98,7 @@ local function moveAnts()
                                     ant.vel.x = ant.vel.x * -1
                                     ant.vel.y = ant.vel.y * -1
                                     ant.holdingFood = true
-                                    table.remove(batch.food, key)
+                                    table.remove(foodBatch[i].food, key)
                                     break
                                 end
                             end
@@ -237,27 +248,33 @@ local function diffuse()
         end
     end
 
+    currentMaxPheromone = 0
+
     for x = 1, w do
         for y = 1, h do
             pheromones[x][y].food = newPheromones[x][y].food
             pheromones[x][y].home = newPheromones[x][y].home
+            if currentMaxPheromone < newPheromones[x][y].food then currentMaxPheromone = newPheromones[x][y].food end
+            if currentMaxPheromone < newPheromones[x][y].home then currentMaxPheromone = newPheromones[x][y].home end
         end
     end
+
+    if not pheromoneAdjust then currentMaxPheromone = 1 end
 end 
 
 local function generatePheromoneImg()
     for x = 1, w do
         for y = 1, h do
             local a = 0
-            if pheromones[x][y].food > pheromones[x][y].home then a = pheromones[x][y].food else a = pheromones[x][y].home end
-            pheromoneMap:setPixel(x - 1, y - 1, pheromones[x][y].food, 0, pheromones[x][y].home, a)
+            if pheromones[x][y].food > pheromones[x][y].home then a = pheromones[x][y].food / currentMaxPheromone else a = pheromones[x][y].home / currentMaxPheromone end
+            pheromoneMap:setPixel(x - 1, y - 1, pheromones[x][y].food / currentMaxPheromone, 0, pheromones[x][y].home / currentMaxPheromone, a)
         end
     end
     pheromoneImg:replacePixels(pheromoneMap)
 end
 
 function love.load()
-    love.window.setMode(w, h)
+    love.window.setMode(w*2, h*2)
     love.window.setTitle('Ant colony simulation with '..nTotal..' ants')
 
     -- Init array
@@ -288,8 +305,8 @@ function love.load()
         })
 
         for j = 1, foodBatchSize do
-            local fx = x + math.sin(math.random() * math.pi * 2) * math.random() * foodBatchSize/3
-            local fy = y + math.cos(math.random() * math.pi * 2) * math.random() * foodBatchSize/3
+            local fx = x + math.sin(math.random() * math.pi * 2) * math.random() * foodBatchSize/5
+            local fy = y + math.cos(math.random() * math.pi * 2) * math.random() * foodBatchSize/5
 
             if fx < 0 then fx = fx * -1 end
             if fx > w then fx = fx - (fx - w) end
@@ -314,6 +331,7 @@ function love.update(dt)
 end
 
 function love.draw()
+    love.graphics.scale(2)
     love.graphics.draw(pheromoneImg)
 
     -- Draw pheromones
@@ -323,14 +341,14 @@ function love.draw()
     love.graphics.setColor(0, 1, 0)
     for i, batch in pairs(foodBatch) do
         for k, f in pairs(batch.food) do
-            love.graphics.circle("fill", f.x, f.y, 5)
+            love.graphics.circle("fill", f.x, f.y, 2.5)
         end
     end
 
     -- Draw ants
     for k, ant in pairs(ants) do
         love.graphics.setColor(1, 0, 0)
-        love.graphics.rectangle("fill", ant.x - 2.5, ant.y - 2.5, 5, 5)
+        love.graphics.rectangle("fill", ant.x - 1.5, ant.y - 1.5, 3, 3)
     end
 
     -- Draw nest

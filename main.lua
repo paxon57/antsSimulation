@@ -2,16 +2,16 @@
 local nTotal = 1000 -- Amount of ants 
 local releaseTime = 10 -- Amount of time (seconds) ants should be release in
 local w, h = 1280, 720 -- Resolution and world size
-local nestX, nestY, nestR = 640, 360, 40 -- Nest position and size
+local nestX, nestY, nestR = 210, 360, 40 -- Nest position and size
 local antSpeed = 2 -- Speed of the ants
 local pheromoneAdjust = true -- Adjust pheromone visibility for highest concentrations
 -- CONFIG
-local explorationDesirability = 0.2 -- Exploration preference
+local explorationDesirability = 0.3 -- Exploration preference
 local pheromoneDesirability = 0.2  -- Pheromone following preference
 local foodDesirability = 1 -- Food following preference
-local pheromoneRelease = 4 -- Amount of pheromones released by single ant every tick
+local pheromoneRelease = 10 -- Amount of pheromones released by single ant every tick
 local evaporationRate = 0.02 -- Evaporation per tick
-local diffusionRate = 0.4 -- Diffusion per tick
+local diffusionRate = 0.2-- Diffusion per tick
 local maxPheromoneIntensity = 100 -- Max pheromone concentration
 local foodBatches = 5 -- Amount of food clusters
 local foodBatchSize = 200 -- Amount of food in clsters (and size of the cluster)
@@ -36,13 +36,13 @@ nestR = nestR/2
 
 local pheromoneMap = love.image.newImageData(w, h)
 local pheromoneImg = love.graphics.newImage(pheromoneMap)
-local mapImg = love.graphics.newImage("sprites/map.png")
+local mapData = love.image.newImageData("sprites/map.png")
+local mapImg = love.graphics.newImage(mapData)
 local antImg = love.graphics.newImage("sprites/ant.png")
 
 
 local function round(val) return math.floor(val + 0.5) end
 local function clamp(val, min, max) return (math.min(max, math.max(val, min))) end
-local function dot(vec1, vec2) return vec1.x*vec2.x + vec1.y*vec2.y end
 
 local function spawnAnts(dt)
     local toSpawnPerSec = nTotal / releaseTime
@@ -62,12 +62,6 @@ local function spawnAnts(dt)
         table.insert(ants, ant)
         n = n + 1
     end
-end
-
-local function angVec(vec1, vec2)
-    local vec1len = math.sqrt(vec1.x^2 + vec1.y^2)
-    local vec2len = math.sqrt(vec2.x^2 + vec2.y^2)
-    return math.acos(dot(vec1, vec2)/(math.abs(vec1len)*math.abs(vec2len)))
 end
 
 local function normalize(vec)
@@ -146,15 +140,20 @@ local function moveAnts()
             end
         end
         -- Turn towards biggest concentration
+        local maxH, maxF = 0, 0
         if ant.holdingFood then
-            if frontHome > leftHome and frontHome > rightHome then px = frontX - ant.x py = frontY - ant.y
-            elseif leftHome > frontHome and leftHome > rightHome then px = leftX - ant.x py = leftY - ant.y
-            elseif rightHome > frontHome and rightHome > leftHome then px = rightX - ant.x py = rightY - ant.y end
+            if frontHome > leftHome and frontHome > rightHome then px = frontX - ant.x py = frontY - ant.y maxH = frontHome
+            elseif leftHome > frontHome and leftHome > rightHome then px = leftX - ant.x py = leftY - ant.y maxH = leftHome
+            elseif rightHome > frontHome and rightHome > leftHome then px = rightX - ant.x py = rightY - ant.y maxH = rightHome end
         else
-            if frontFood > leftFood and frontFood > rightFood then px = frontX - ant.x py = frontY - ant.y
-            elseif leftFood > frontFood and leftFood > rightFood then px = leftX - ant.x py = leftY - ant.y
-            elseif rightFood > frontFood and rightFood > leftFood then px = rightX - ant.x py = rightY - ant.y end
+            if frontFood > leftFood and frontFood > rightFood then px = frontX - ant.x py = frontY - ant.y maxF = frontFood
+            elseif leftFood > frontFood and leftFood > rightFood then px = leftX - ant.x py = leftY - ant.y maxF = leftFood
+            elseif rightFood > frontFood and rightFood > leftFood then px = rightX - ant.x py = rightY - ant.y maxF = rightFood end
         end
+        local max = 0
+        if maxH > maxF then max = maxH else max = maxF end
+        max = max / maxPheromoneIntensity
+
         -- Normalize
         local pVel = normalize({x = px, y = py})
         px = pVel.x
@@ -170,13 +169,22 @@ local function moveAnts()
         end
         -- Sum up velocities
         local vel = {
-            x = ant.vel.x + dx * explorationDesirability + fx * foodDesirability + px * pheromoneDesirability + nx,
-            y = ant.vel.y + dy * explorationDesirability + fy * foodDesirability + py * pheromoneDesirability + ny
+            x = ant.vel.x + dx * explorationDesirability + fx * foodDesirability + px * pheromoneDesirability * max + nx,
+            y = ant.vel.y + dy * explorationDesirability + fy * foodDesirability + py * pheromoneDesirability * max + ny
         }
         ant.vel = normalize(vel)
 
         ant.x = round(ant.x + ant.vel.x * antSpeed)
         ant.y = round(ant.y + ant.vel.y * antSpeed)
+
+        -- Check for map collision and move away
+        local _,_,_,a = mapData:getPixel(ant.x * 2, ant.y * 2)
+        if a > 0 then
+            ant.vel.x = -ant.vel.x
+            ant.vel.y = -ant.vel.y
+            ant.x = round(ant.x + ant.vel.x * antSpeed)
+            ant.y = round(ant.y + ant.vel.y * antSpeed)
+        end
 
         -- Check for the nest collision
         if ant.holdingFood then
@@ -209,8 +217,8 @@ end
 local function evaporate()
     for x = 1, w do
         for y = 1, h do
-            pheromones[x][y].food = clamp(pheromones[x][y].food - evaporationRate, 0, maxPheromoneIntensity)
-            pheromones[x][y].home = clamp(pheromones[x][y].home - evaporationRate, 0, maxPheromoneIntensity)
+            pheromones[x][y].food = clamp(pheromones[x][y].food - pheromones[x][y].food*evaporationRate, 0, maxPheromoneIntensity)
+            pheromones[x][y].home = clamp(pheromones[x][y].home - pheromones[x][y].home*evaporationRate, 0, maxPheromoneIntensity)
         end
     end
 end 
@@ -300,6 +308,17 @@ function love.load()
         local x = math.random() * w
         local y = math.random() * h
 
+        -- Make sure it's in walkable part of the map
+        while true do
+            local _,_,_,a = mapData:getPixel(x * 2, y * 2)
+            if a > 0 then
+                x = math.random() * w
+                y = math.random() * h
+            else
+                break
+            end
+        end
+
         table.insert(foodBatch, {
             x = x,
             y = y,
@@ -309,6 +328,17 @@ function love.load()
         for j = 1, foodBatchSize do
             local fx = x + math.sin(math.random() * math.pi * 2) * math.random() * foodBatchSize/5
             local fy = y + math.cos(math.random() * math.pi * 2) * math.random() * foodBatchSize/5
+
+            -- Make sure it's in walkable part of the map
+            while true do
+                local _,_,_,a = mapData:getPixel(fx * 2, fy * 2)
+                if a > 0 then
+                    fx = x + math.sin(math.random() * math.pi * 2) * math.random() * foodBatchSize/5
+                    fy = y + math.cos(math.random() * math.pi * 2) * math.random() * foodBatchSize/5
+                else
+                    break
+                end
+            end
 
             if fx < 0 then fx = fx * -1 end
             if fx > w then fx = fx - (fx - w) end
@@ -334,7 +364,7 @@ end
 
 function love.draw()
     love.graphics.scale(2)
-
+    love.graphics.setBackgroundColor(243/255, 156/255, 18/255)
     love.graphics.draw(mapImg, nil, nil, nil, 0.5)
 
     -- Draw pheromones

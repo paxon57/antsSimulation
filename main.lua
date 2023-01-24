@@ -10,10 +10,10 @@ local explorationDesirability = 0.2 -- Exploration preference
 local pheromoneDesirability = 0.2  -- Pheromone following preference
 local foodDesirability = 1 -- Food following preference
 local pheromoneRelease = 4 -- Amount of pheromones released by single ant every tick
-local evaporationRate = 0.01 -- Evaporation per tick
+local evaporationRate = 0.02 -- Evaporation per tick
 local diffusionRate = 0.4 -- Diffusion per tick
 local maxPheromoneIntensity = 100 -- Max pheromone concentration
-local foodBatches = 3 -- Amount of food clusters
+local foodBatches = 5 -- Amount of food clusters
 local foodBatchSize = 200 -- Amount of food in clsters (and size of the cluster)
 local foodDetectionDistance = 25 -- How far away can an ant see the food from
 local antFov = math.pi / 4 -- Field of view of the ants
@@ -36,6 +36,8 @@ nestR = nestR/2
 
 local pheromoneMap = love.image.newImageData(w, h)
 local pheromoneImg = love.graphics.newImage(pheromoneMap)
+local mapImg = love.graphics.newImage("sprites/map.png")
+local antImg = love.graphics.newImage("sprites/ant.png")
 
 
 local function round(val) return math.floor(val + 0.5) end
@@ -332,7 +334,8 @@ end
 
 function love.draw()
     love.graphics.scale(2)
-    love.graphics.draw(pheromoneImg)
+
+    love.graphics.draw(mapImg, nil, nil, nil, 0.5)
 
     -- Draw pheromones
     love.graphics.draw(pheromoneImg)
@@ -348,7 +351,8 @@ function love.draw()
     -- Draw ants
     for k, ant in pairs(ants) do
         love.graphics.setColor(1, 0, 0)
-        love.graphics.rectangle("fill", ant.x - 1.5, ant.y - 1.5, 3, 3)
+        --love.graphics.rectangle("fill", ant.x - 1.5, ant.y - 1.5, 3, 3)
+        love.graphics.draw(antImg, ant.x, ant.y, math.atan2(ant.vel.y, ant.vel.x) + math.pi/2, 0.005, 0.005, antImg:getWidth()/2, antImg:getHeight()/2)
     end
 
     -- Draw nest
